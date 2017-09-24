@@ -89,18 +89,19 @@ int main(void)
 		TERM_WIDTH, TERM_HEIGHT, TERM_MAX_CHARS);
 
 	select_term(&t1);
+
 	int wait = 0;
-	// scroll test
 	while (true) {
 		if (!wait) {
 			cpuStartTiming(0);
 		}
 		term_rst(&t1, 15, 0);
-		for (unsigned i = 0; i < 16; ++i) {
+		// scroll test
+		for (unsigned i = 0; i < 0x20; ++i) {
 			if (wait) {
 				swiWaitForVBlank();
 			}
-			iprtf("%x\n", i);
+			iprtf("\t%02x\n", i);
 		}
 		prt("...\rcarriage return test\n");
 		// color test

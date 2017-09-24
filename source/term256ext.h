@@ -1,4 +1,6 @@
 #pragma once
+
+#include "term256.h"
  
 void select_term(term_t *t);
 

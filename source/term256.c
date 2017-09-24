@@ -130,6 +130,9 @@ void term_ctl(term_t *t, int ctl_code, int ctl_param) {
 		unsigned x_pos = t->cur % TERM_WIDTH;
 		unsigned min_cur = t->cur - x_pos;
 		unsigned max_cur = t->cur - x_pos + TERM_WIDTH - 1;
+		if (max_cur > TERM_MAX_CHARS) {
+			max_cur = TERM_MAX_CHARS;
+		}
 		t->cur += ctl_param;
 		if (t->cur < min_cur) {
 			t->cur = min_cur;
@@ -176,9 +179,19 @@ void term_prt(term_t * t, const char *s) {
 			if (new_tx > TERM_WIDTH) {
 				new_tx = TERM_WIDTH;
 			}
-			t->cur += new_tx - tx;
+			new_tx -= tx; // becomes d_tx now
+			if (new_tx > 0) {
+				if (t->cur == TERM_MAX_CHARS) {
+					scroll(t);
+				}
+				t->cur += new_tx;
+			}
 		} else {
+#ifdef TERM256_DEBUG
 			if (t->cur == TERM_MAX_CHARS) {
+#else
+			if (t->cur >= TERM_MAX_CHARS) {
+#endif
 				scroll(t);
 			}
 			write_char(t->fb,
@@ -189,4 +202,3 @@ void term_prt(term_t * t, const char *s) {
 		}
 	}
 }
-
