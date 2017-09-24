@@ -14,8 +14,8 @@
 #define SCROLL_Y0 ((TERM_HEIGHT - SCREEN_HEIGHT))
 
 // use extra bg space to do native scroll, if possible
-#define FB_ROWS (BG_HEIGHT / FONT_HEIGHT)
-#define HW_SCROLL_STEPS (FB_ROWS - TERM_ROWS)
+#define BG_ROWS (BG_HEIGHT / FONT_HEIGHT)
+#define HW_SCROLL_STEPS (BG_ROWS - TERM_ROWS)
 
 // make VC happy
 #ifdef _MSC_VER
@@ -116,6 +116,12 @@ void clr_screen(void *fb, u8 color) {
 
 void term_rst(term_t *t, u8 fg, u8 bg) {
 	t->cur = 0;
+	if (t->scroll_pos != 0) {
+		t->scroll_pos = 0;
+		if (t->set_scroll_cb) {
+			t->set_scroll_cb(SCROLL_X0, SCROLL_Y0, t->set_scroll_cb_param);
+		}
+	}
 	if (fg != t->cur_fg || bg != t->cur_bg) {
 		t->cur_fg = fg;
 		t->cur_bg = bg;
@@ -128,9 +134,7 @@ void term_init(term_t *t, u16 *fb, set_scroll_cb_t cb, void *cb_param) {
 	t->fb = fb;
 	t->set_scroll_cb = cb;
 	t->set_scroll_cb_param = cb_param;
-	if (cb != 0) {
-		cb(SCROLL_X0, SCROLL_Y0, cb_param);
-	}
+	t->scroll_pos = 1; // trigger scroll_cb in term_rst
 	term_rst(t, 15, 0);
 }
 
@@ -140,18 +144,46 @@ static_assert((FONT_HEIGHT * BG_WIDTH / sizeof(u32)) % 8 == 0, "you can't unroll
 ITCM_CODE
 #endif
 void scroll(term_t *t) {
-	u32 *p = (u32*)t->fb;
-	u32 *p_src = p + (FONT_HEIGHT * BG_WIDTH / sizeof(u32));
-	u32 *p_end = p + (FONT_HEIGHT * BG_WIDTH / sizeof(u32) * (TERM_ROWS - 1));
-	while (p < p_end) {
-		*p++ = *p_src++; *p++ = *p_src++; *p++ = *p_src++; *p++ = *p_src++;
-		*p++ = *p_src++; *p++ = *p_src++; *p++ = *p_src++; *p++ = *p_src++;
+	if (t->set_scroll_cb == 0) {
+		u32 *p = (u32*)t->fb;
+		u32 *p_end = p + (FONT_HEIGHT * BG_WIDTH / sizeof(u32) * (TERM_ROWS - 1));
+		u32 *p_src = p + (FONT_HEIGHT * BG_WIDTH / sizeof(u32));
+		while (p < p_end) {
+			*p++ = *p_src++; *p++ = *p_src++; *p++ = *p_src++; *p++ = *p_src++;
+			*p++ = *p_src++; *p++ = *p_src++; *p++ = *p_src++; *p++ = *p_src++;
+		}
+		while (p < p_src) {
+			*p++ = 0; *p++ = 0; *p++ = 0; *p++ = 0;
+			*p++ = 0; *p++ = 0; *p++ = 0; *p++ = 0;
+		}
+		t->cur -= TERM_COLS;
+	} else if (t->scroll_pos < HW_SCROLL_STEPS){
+		u32 *p = (u32*)t->fb + (FONT_HEIGHT * BG_WIDTH / sizeof(u32) * (TERM_ROWS + t->scroll_pos));
+		u32 *p_end = p + (FONT_HEIGHT * BG_WIDTH / sizeof(u32));
+		while (p < p_end) {
+			*p++ = 0; *p++ = 0; *p++ = 0; *p++ = 0;
+			*p++ = 0; *p++ = 0; *p++ = 0; *p++ = 0;
+		}
+		t->scroll_pos += 1;
+		t->set_scroll_cb(SCROLL_X0, SCROLL_Y0 + FONT_HEIGHT * t->scroll_pos, t->set_scroll_cb_param);
+		t->cur -= TERM_COLS;
+	} else {
+		u32 *p = (u32*)t->fb;
+		u32 *p_end = p + (FONT_HEIGHT * BG_WIDTH / sizeof(u32) * (TERM_ROWS - 1));
+		u32 *p_src = p + (FONT_HEIGHT * BG_WIDTH / sizeof(u32) * (BG_ROWS - TERM_ROWS + 1));
+		while (p < p_end) {
+			*p++ = *p_src++; *p++ = *p_src++; *p++ = *p_src++; *p++ = *p_src++;
+			*p++ = *p_src++; *p++ = *p_src++; *p++ = *p_src++; *p++ = *p_src++;
+		}
+		p_end = p + (FONT_HEIGHT * BG_WIDTH / sizeof(u32));
+		while (p < p_end) {
+			*p++ = 0; *p++ = 0; *p++ = 0; *p++ = 0;
+			*p++ = 0; *p++ = 0; *p++ = 0; *p++ = 0;
+		}
+		t->cur -= TERM_COLS;
+		t->scroll_pos = 0;
+		t->set_scroll_cb(SCROLL_X0, SCROLL_Y0, t->set_scroll_cb_param);
 	}
-	while (p < p_src) {
-		*p++ = 0; *p++ = 0; *p++ = 0; *p++ = 0;
-		*p++ = 0; *p++ = 0; *p++ = 0; *p++ = 0;
-	}
-	t->cur -= TERM_COLS;
 }
 
 void term_ctl(term_t *t, int ctl_code, int ctl_param) {
@@ -238,7 +270,7 @@ void term_prt(term_t *t, const char *s) {
 			}
 			write_char(t,
 				(t->cur % TERM_COLS) * FONT_WIDTH,
-				(t->cur / TERM_COLS) * FONT_HEIGHT,
+				((t->cur / TERM_COLS) + t->scroll_pos) * FONT_HEIGHT,
 				c, t->cur_fg, t->cur_bg);
 			++t->cur;
 		}
@@ -252,7 +284,7 @@ void term_raw(term_t *t, char c) {
 	}
 	write_char(t,
 		(t->cur % TERM_COLS) * FONT_WIDTH,
-		(t->cur / TERM_COLS) * FONT_HEIGHT,
+		((t->cur / TERM_COLS) + t->scroll_pos) * FONT_HEIGHT,
 		c, t->cur_fg, t->cur_bg);
 	++t->cur;
 }

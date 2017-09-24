@@ -95,6 +95,7 @@ int main(void)
 
 	term_init(&t0, fb0, set_scroll, (void*)bg0);
 	term_init(&t1, fb1, set_scroll, (void*)bg1);
+	// term_init(&t1, fb1, 0, 0);
 
 	select_term(&t0);
 	int is_DSi = isDSiMode();
@@ -104,7 +105,7 @@ int main(void)
 	}
 
 	iprtf("This is an experimental 256 color terminal emulator\n"
-		"\tColumns:\t%u\n\tRows:\t%u\n\tChars:\t%u\n"
+		"\tColumns:\t%u\n\tRows:\t\t%u\n\tChars:\t\t%u\n"
 		" \n"
 		"press A to continue, B to quit\n",
 		TERM_COLS, TERM_ROWS, TERM_MAX_CHARS);
@@ -144,6 +145,7 @@ int main(void)
 		for (unsigned i = 1; i < 0x10; ++i) {
 			if (wait) {
 				swiWaitForVBlank();
+				// wait_key(KEY_A);
 			}
 			iprtf("\t%02x\n", i);
 		}
