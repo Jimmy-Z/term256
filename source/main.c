@@ -73,7 +73,7 @@ int main(void)
 		"\tWidth:\t%u\n\tHeight:\t%u\n\tChars:\t%u\n"
 		" \n"
 		"press A to loop, B to quit",
-		TERM_WIDTH, TERM_HEIGHT, TERM_BUF_LEN);
+		TERM_WIDTH, TERM_HEIGHT, TERM_MAX_CHARS);
 
 	videoSetMode(MODE_3_2D);
 	vramSetBankA(VRAM_A_MAIN_BG);
@@ -82,11 +82,10 @@ int main(void)
 	term_init(&t1, fb1);
 	select_term(&t1);
 	
+	int flip = 0;
 	// scroll test
 	while (true) {
-		if (wait_key(KEY_A | KEY_B) == KEY_B) {
-			break;
-		}
+		term_rst(&t1, flip ? 0 : 15, flip ? 15 : 0);
 		for (unsigned i = 0; i < 16; ++i) {
 			iprtf("%x\n", i);
 		}
@@ -97,18 +96,21 @@ int main(void)
 			iprtf("%02x", i);
 		}
 		// color and font face test
-		term_ctl(&t1, TERM_COLOR, 15);
-		term_ctl(&t1, TERM_BG_COLOR, 0);
+		term_ctl(&t1, TERM_COLOR, flip ? 0 : 15);
+		term_ctl(&t1, TERM_BG_COLOR, flip ? 15 : 0);
 		prt("\na quick brown fox jumps over the lazy dog,\n");
-		term_ctl(&t1, TERM_COLOR, 0);
-		term_ctl(&t1, TERM_BG_COLOR, 15);
+		term_ctl(&t1, TERM_COLOR, flip ? 15 : 0);
+		term_ctl(&t1, TERM_BG_COLOR, flip ? 0 : 15);
 		prt("A QUICK BROWN FOX JUMPS OVER THE LAZY DOG.\n");
 
 		if (wait_key(KEY_A | KEY_B) == KEY_B) {
 			break;
 		}
-		show_ansi256_color_table(fb1, SCREEN_WIDTH, SCREEN_HEIGHT);
+		flip = ~flip;
 	}
+	clr_screen(fb1, 0);
+	show_ansi256_color_table(fb1, SCREEN_WIDTH, SCREEN_HEIGHT);
+	wait_key(KEY_A | KEY_B);
 	return 0;
 }
 

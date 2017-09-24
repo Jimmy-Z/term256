@@ -60,45 +60,37 @@ void generate_ansi256_palette(color_t *p) {
 }
 
 static_assert(FONT_WIDTH == 6, "this thing can only handle FONT_WIDTH == 6");
-
 #ifdef ARM9
 ITCM_CODE
 #endif
 UNROLL
 static inline void write_char(u16 *fb, unsigned x, unsigned y, unsigned char c, unsigned char color, unsigned char bg_color) {
-	const unsigned char *g = &font[c * FONT_HEIGHT];
+	const unsigned char *g = font + c * FONT_HEIGHT;
+	u16 *p = fb + (y * SCREEN_WIDTH + x) / 2;
 	for (unsigned fy = 0; fy < FONT_HEIGHT; ++fy) {
-		unsigned char l = g[fy]; // line fy of the glyph
-		u16 *p = &fb[((y + fy) * SCREEN_WIDTH + x) / 2];
+		unsigned char l = *g++; // line 0 of the glyph
 		*p++ = (l & 0x80 ? color : bg_color) | ((l & 0x40 ? color : bg_color) << 8);
 		*p++ = (l & 0x20 ? color : bg_color) | ((l & 0x10 ? color : bg_color) << 8);
 		*p = (l & 0x08 ? color : bg_color) | ((l & 0x04 ? color : bg_color) << 8);
+		p += SCREEN_WIDTH / 2 - 2;
+	}
+}
+
+void clr_screen(void *fb, u8 color) {
+	u32 *p = (u32*)fb;
+	u32 *p_end = p + (SCREEN_WIDTH * SCREEN_HEIGHT / sizeof(u32));
+	u32 c4 = color | color << 8 | color << 16 | color << 24;
+	while (p < p_end) {
+		*p++ = c4; *p++ = c4; *p++ = c4; *p++ = c4;
+		*p++ = c4; *p++ = c4; *p++ = c4; *p++ = c4;
 	}
 }
 
 void term_rst(term_t *t, u8 fg, u8 bg) {
-	/* so memset just fail?
-	memset(t->c, 0, sizeof(TERM_BUF_LEN));
-	memset(t->fg, fg, sizeof(TERM_BUF_LEN));
-	memset(t->bg, bg, sizeof(TERM_BUF_LEN));
-	for (unsigned i = 0; i < TERM_BUF_LEN; ++i) {
-		if (t->fg[i] != fg) {
-			iprintf("fg[%u] == %u\n", i, t->fg[i]);
-			break;
-		}
-	}
-	*/
-	for (unsigned i = 0; i < TERM_BUF_LEN; ++i) {
-		t->c[i] = 0;
-		t->fg[i] = fg;
-		t->bg[i] = bg;
-	}
 	t->cur = 0;
 	t->cur_fg = fg;
 	t->cur_bg = bg;
-	t->update_region_a = 0;
-	t->update_region_b = 0;
-	t->needs_full_update = 0;
+	clr_screen(t->fb, bg);
 }
 
 void term_init(term_t *t, u16 *fb) {
@@ -106,48 +98,22 @@ void term_init(term_t *t, u16 *fb) {
 	term_rst(t, 15, 0);
 }
 
-// void wait_key(unsigned key);
-
+static_assert((FONT_HEIGHT * SCREEN_WIDTH) % sizeof(u32) == 0, "this thing can't handle this");
+static_assert((FONT_HEIGHT * SCREEN_WIDTH / sizeof(u32)) % 8 == 0, "you can't unroll that much");
 #ifdef ARM9
 ITCM_CODE
 #endif
-void term_update_fb(term_t *t) {
-	if (t->needs_full_update) {
-		unsigned offset = 0;
-		unsigned y = 0;
-		for (unsigned ty = 0; ty < TERM_HEIGHT; ++ty) {
-			unsigned x = 0;
-			for (unsigned tx = 0; tx < TERM_WIDTH; ++tx) {
-				// wait_key(KEY_A);
-				// iprintf("%u,%c,%u,%u,%u,%u,%u,%u\n", offset, t->c[offset], t->fg[offset], t->bg[offset], ty, tx, y, x);
-				write_char(t->fb, x, y, t->c[offset], t->fg[offset], t->bg[offset]);
-				x += FONT_WIDTH;
-				++offset;
-			}
-			y += FONT_HEIGHT;
-		}
-		t->needs_full_update = 0;
-		t->update_region_a = t->update_region_b = t->cur;
-	} else if (t->update_region_a < t->update_region_b) {
-		// TODO: partial updates
-	}
-}
-
 void scroll(term_t *t) {
-	unsigned i;
-	u8 *p0 = t->c, *p0s = p0 + TERM_WIDTH;
-	u8 *p1 = t->fg, *p1s = p1 + TERM_WIDTH;
-	u8 *p2 = t->bg, *p2s = p2 + TERM_WIDTH;
-	for (i = 0; i < TERM_BUF_LEN - TERM_WIDTH; ++i){
-		*p0++ = *p0s++;
-		*p1++ = *p1s++;
-		*p2++ = *p2s++;
+	u32 *p = (u32*)t->fb;
+	u32 *p_src = p + (FONT_HEIGHT * SCREEN_WIDTH / sizeof(u32));
+	u32 *p_end = p + (FONT_HEIGHT * SCREEN_WIDTH / sizeof(u32) * (TERM_HEIGHT - 1));
+	while (p < p_end) {
+		*p++ = *p_src++; *p++ = *p_src++; *p++ = *p_src++; *p++ = *p_src++;
+		*p++ = *p_src++; *p++ = *p_src++; *p++ = *p_src++; *p++ = *p_src++;
 	}
-	// fill the new line with cursor fg/bg
-	for (i = 0; i < TERM_WIDTH; ++i) {
-		*p0++ = 0;
-		*p1++ = t->cur_fg;
-		*p2++ = t->cur_bg;
+	while (p < p_src) {
+		*p++ = 0; *p++ = 0; *p++ = 0; *p++ = 0;
+		*p++ = 0; *p++ = 0; *p++ = 0; *p++ = 0;
 	}
 	t->cur -= TERM_WIDTH;
 }
@@ -189,11 +155,12 @@ void term_ctl(term_t *t, int ctl_code, int ctl_param) {
 #define TAB_WIDTH 4
 
 void term_prt(term_t * t, const char *s) {
-	// I'm too lazy to parse ANSI escape code
-	// use term_ctl instead
+	// TODO: parse ANSI escape code
+	// currently you can use term_ctl instead
 	unsigned char c;
-	while ((c = *(const unsigned char*)s) != 0) {
+	while ((c = *(const unsigned char*)s++) != 0) {
 		if (c == '\n') {
+			// tx is short for terminal x, not transmission
 			unsigned tx = t->cur % TERM_WIDTH;
 			if (tx != 0) {
 				// do not allow empty line
@@ -211,18 +178,15 @@ void term_prt(term_t * t, const char *s) {
 			}
 			t->cur += new_tx - tx;
 		} else {
-			if (t->cur == TERM_BUF_LEN) {
+			if (t->cur == TERM_MAX_CHARS) {
 				scroll(t);
 			}
-			t->c[t->cur] = c;
-			t->fg[t->cur] = t->cur_fg;
-			t->bg[t->cur] = t->cur_bg;
+			write_char(t->fb,
+				(t->cur % TERM_WIDTH) * FONT_WIDTH,
+				(t->cur / TERM_WIDTH) * FONT_HEIGHT,
+				c, t->cur_fg, t->cur_bg);
 			++t->cur;
 		}
-		++s;
 	}
-	// TODO: partial updates
-	t->needs_full_update = 1;
-	term_update_fb(t);
 }
 
