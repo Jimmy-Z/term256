@@ -102,17 +102,22 @@ int main(void)
 			iprtf(" %x", i);
 		}
 		prt("\n");
-		for (unsigned i = 0; i < 0x100; ++i) {
-			if (!(i & 0xf)) {
-				iprtf("%02x", i);
+		for (unsigned i = 0; i < 0x100; i += 0x10) {
+			iprtf("%02x", i);
+			for (unsigned j = 0; j < 0x10; ++j) {
+				unsigned c = i | j;
+				term_raw(&t1, ' ');
+				term_raw(&t1, c);
 			}
-			iprtf(" %c", i == 0 || i == '\n' || i == '\r' || i == '\t' ? ' ' : i);
-			if ((i & 0xf) == 0xf) {
-				prt("\n");
-			}
+			iprtf(" %02x\n", i);
 		}
-		if (wait) {
-			wait_key(KEY_A);
+		prt("  ");
+		for (unsigned i = 0; i < 0x10; ++i) {
+			iprtf(" %x", i);
+		}
+		prt("\n");
+		if (wait && wait_key(KEY_A | KEY_B) == KEY_B) {
+			break;
 		}
 		// scroll test
 		for (unsigned i = 1; i < 0x10; ++i) {
@@ -124,7 +129,7 @@ int main(void)
 		prt("...\rcarriage return test\n");
 		// color test
 		for (unsigned i = 0; i < 256; ++i) {
-			if (wait) {
+			if (wait && !(i & 0xf)) {
 				swiWaitForVBlank();
 			}
 			term_ctl(&t1, TERM_COLOR, i);

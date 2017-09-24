@@ -223,3 +223,15 @@ void term_prt(term_t * t, const char *s) {
 		}
 	}
 }
+
+// print a raw character, even \x00 or \xff
+void term_raw(term_t *t, char c) {
+	if (t->cur == TERM_MAX_CHARS) {
+		scroll(t);
+	}
+	write_char(t,
+		(t->cur % TERM_WIDTH) * FONT_WIDTH,
+		(t->cur / TERM_WIDTH) * FONT_HEIGHT,
+		c, t->cur_fg, t->cur_bg);
+	++t->cur;
+}

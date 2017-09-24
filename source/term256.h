@@ -35,3 +35,5 @@ void term_rst(term_t *t, u8 fg, u8 bg);
 void term_prt(term_t * t, const char *string);
 
 void term_ctl(term_t *t, int ctl_code, int ctl_param);
+
+void term_raw(term_t *t, char c);
