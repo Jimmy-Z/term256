@@ -85,19 +85,37 @@ int main(void)
 	iprtf("This is an experimental 256 color terminal emulator\n"
 		"\tWidth:\t%u\n\tHeight:\t%u\n\tChars:\t%u\n"
 		" \n"
-		"press A to loop, B to quit\n",
+		"press A to continue, B to quit\n",
 		TERM_WIDTH, TERM_HEIGHT, TERM_MAX_CHARS);
 
 	select_term(&t1);
 
-	int wait = 0;
+	int wait = 1;
 	while (true) {
 		if (!wait) {
 			cpuStartTiming(0);
 		}
 		term_rst(&t1, 15, 0);
+		// char map
+		prt("  ");
+		for (unsigned i = 0; i < 0x10; ++i) {
+			iprtf(" %x", i);
+		}
+		prt("\n");
+		for (unsigned i = 0; i < 0x100; ++i) {
+			if (!(i & 0xf)) {
+				iprtf("%02x", i);
+			}
+			iprtf(" %c", i == 0 || i == '\n' || i == '\r' || i == '\t' ? ' ' : i);
+			if ((i & 0xf) == 0xf) {
+				prt("\n");
+			}
+		}
+		if (wait) {
+			wait_key(KEY_A);
+		}
 		// scroll test
-		for (unsigned i = 0; i < 0x20; ++i) {
+		for (unsigned i = 1; i < 0x10; ++i) {
 			if (wait) {
 				swiWaitForVBlank();
 			}
@@ -127,14 +145,14 @@ int main(void)
 		prt("A QUICK BROWN FOX JUMPS OVER THE LAZY DOG.\n");
 		if (!wait) {
 			select_term(&t0);
-			iprtf("render time %u usec\n", timerTicks2usec(cpuEndTiming()));
+			iprtf("render time %lu \xe6s\n", timerTicks2usec(cpuEndTiming()));
 			select_term(&t1);
 		}
 
 		if (wait_key(KEY_A | KEY_B) == KEY_B) {
 			break;
 		}
-		wait = ~wait;
+		wait = !wait;
 	}
 	clr_screen(fb1, 0);
 	show_ansi256_color_table(fb1, SCREEN_WIDTH, SCREEN_HEIGHT);
