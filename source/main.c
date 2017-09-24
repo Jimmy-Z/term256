@@ -64,49 +64,76 @@ term_t t0, t1;
 int main(void)
 {
 	videoSetModeSub(MODE_3_2D);
+	videoSetMode(MODE_3_2D);
 	vramSetBankC(VRAM_C_SUB_BG);
+	vramSetBankA(VRAM_A_MAIN_BG);
 	u16 *fb0 = bgGetGfxPtr(bgInitSub(3, BgType_Bmp8, BgSize_B8_256x256, 0, 0));
+	u16 *fb1 = bgGetGfxPtr(bgInit(3, BgType_Bmp8, BgSize_B8_256x256, 0, 0));
 	generate_ansi256_palette(BG_PALETTE_SUB);
+	dmaCopy(BG_PALETTE_SUB, BG_PALETTE, 256 * 2);
+
 	term_init(&t0, fb0);
+	term_init(&t1, fb1);
+
 	select_term(&t0);
-	iprtf("This an experimental 256 color terminal emulator\n"
+	int is_DSi = isDSiMode();
+	if (is_DSi) {
+		prt("DSi Mode, previous CPU clock was ");
+		setCpuClock(true) ? prt("high\n") : prt("low\n");
+	}
+
+	iprtf("This is an experimental 256 color terminal emulator\n"
 		"\tWidth:\t%u\n\tHeight:\t%u\n\tChars:\t%u\n"
 		" \n"
-		"press A to loop, B to quit",
+		"press A to loop, B to quit\n",
 		TERM_WIDTH, TERM_HEIGHT, TERM_MAX_CHARS);
 
-	videoSetMode(MODE_3_2D);
-	vramSetBankA(VRAM_A_MAIN_BG);
-	u16 *fb1 = bgGetGfxPtr(bgInit(3, BgType_Bmp8, BgSize_B8_256x256, 0, 0));
-	dmaCopy(BG_PALETTE_SUB, BG_PALETTE, 256 * 2);
-	term_init(&t1, fb1);
 	select_term(&t1);
-	
-	int flip = 0;
+	int wait = 0;
 	// scroll test
 	while (true) {
-		term_rst(&t1, flip ? 0 : 15, flip ? 15 : 0);
+		if (!wait) {
+			cpuStartTiming(0);
+		}
+		term_rst(&t1, 15, 0);
 		for (unsigned i = 0; i < 16; ++i) {
+			if (wait) {
+				swiWaitForVBlank();
+			}
 			iprtf("%x\n", i);
 		}
 		prt("...\rcarriage return test\n");
 		// color test
 		for (unsigned i = 0; i < 256; ++i) {
+			if (wait) {
+				swiWaitForVBlank();
+			}
 			term_ctl(&t1, TERM_COLOR, i);
 			iprtf("%02x", i);
 		}
-		// color and font face test
-		term_ctl(&t1, TERM_COLOR, flip ? 0 : 15);
-		term_ctl(&t1, TERM_BG_COLOR, flip ? 15 : 0);
-		prt("\na quick brown fox jumps over the lazy dog,\n");
-		term_ctl(&t1, TERM_COLOR, flip ? 15 : 0);
-		term_ctl(&t1, TERM_BG_COLOR, flip ? 0 : 15);
+		prt("\n");
+		// font face test
+		term_ctl(&t1, TERM_COLOR, 15);
+		prt("a quick brown fox jumps over the lazy dog,\n");
+		term_ctl(&t1, TERM_COLOR, 0);
+		term_ctl(&t1, TERM_BG_COLOR, 15);
+		prt("a quick brown fox jumps over the lazy dog,\n");
+		term_ctl(&t1, TERM_COLOR, 15);
+		term_ctl(&t1, TERM_BG_COLOR, 0);
 		prt("A QUICK BROWN FOX JUMPS OVER THE LAZY DOG.\n");
+		term_ctl(&t1, TERM_COLOR, 0);
+		term_ctl(&t1, TERM_BG_COLOR, 15);
+		prt("A QUICK BROWN FOX JUMPS OVER THE LAZY DOG.\n");
+		if (!wait) {
+			select_term(&t0);
+			iprtf("render time %u usec\n", timerTicks2usec(cpuEndTiming()));
+			select_term(&t1);
+		}
 
 		if (wait_key(KEY_A | KEY_B) == KEY_B) {
 			break;
 		}
-		flip = ~flip;
+		wait = ~wait;
 	}
 	clr_screen(fb1, 0);
 	show_ansi256_color_table(fb1, SCREEN_WIDTH, SCREEN_HEIGHT);
