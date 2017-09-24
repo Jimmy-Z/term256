@@ -75,8 +75,7 @@ unsigned wait_key(unsigned wanted) {
 term_t t0, t1;
 
 void set_scroll(int x, int y, void *param) {
-	int bg = (int)param;
-	bgSetScroll(bg, x, y);
+	bgSetScroll(*(int*)param, x, y);
 	bgUpdate();
 }
 
@@ -93,8 +92,8 @@ int main(void)
 	generate_ansi256_palette(BG_PALETTE_SUB);
 	dmaCopy(BG_PALETTE_SUB, BG_PALETTE, 256 * 2);
 
-	term_init(&t0, fb0, set_scroll, (void*)bg0);
-	term_init(&t1, fb1, set_scroll, (void*)bg1);
+	term_init(&t0, fb0, set_scroll, &bg0);
+	term_init(&t1, fb1, set_scroll, &bg1);
 	// term_init(&t1, fb1, 0, 0);
 
 	select_term(&t0);
