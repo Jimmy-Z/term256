@@ -16,6 +16,7 @@ typedef struct {
 	unsigned cur;
 	u8 cur_fg;
 	u8 cur_bg;
+	u16 clut[FONT_WIDTH / sizeof(u16) * (1 << FONT_WIDTH)];
 }term_t;
 
 enum {

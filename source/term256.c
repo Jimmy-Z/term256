@@ -63,15 +63,27 @@ static_assert(FONT_WIDTH == 6, "this thing can only handle FONT_WIDTH == 6");
 #ifdef ARM9
 ITCM_CODE
 #endif
+static void term_gen_clut(term_t *t) {
+	u16 *p = t->clut;
+	for (unsigned i = 0; i < (1 << FONT_WIDTH); ++i) {
+		*p++ = (i & 0x20 ? t->cur_fg : t->cur_bg) | ((i & 0x10 ? t->cur_fg : t->cur_bg) << 8);
+		*p++ = (i & 0x08 ? t->cur_fg : t->cur_bg) | ((i & 0x04 ? t->cur_fg : t->cur_bg) << 8);
+		*p++ = (i & 0x02 ? t->cur_fg : t->cur_bg) | ((i & 0x01 ? t->cur_fg : t->cur_bg) << 8);
+	}
+}
+
+#ifdef ARM9
+ITCM_CODE
+#endif
 UNROLL
-static inline void write_char(u16 *fb, unsigned x, unsigned y, unsigned char c, unsigned char color, unsigned char bg_color) {
+static inline void write_char(term_t *t, unsigned x, unsigned y, unsigned char c, unsigned char color, unsigned char bg_color) {
 	const unsigned char *g = font + c * FONT_HEIGHT;
-	u16 *p = fb + (y * SCREEN_WIDTH + x) / 2;
+	u16 *p = t->fb + (y * SCREEN_WIDTH + x) / 2;
 	for (unsigned fy = 0; fy < FONT_HEIGHT; ++fy) {
-		unsigned char l = *g++; // line 0 of the glyph
-		*p++ = (l & 0x80 ? color : bg_color) | ((l & 0x40 ? color : bg_color) << 8);
-		*p++ = (l & 0x20 ? color : bg_color) | ((l & 0x10 ? color : bg_color) << 8);
-		*p = (l & 0x08 ? color : bg_color) | ((l & 0x04 ? color : bg_color) << 8);
+		u16 *c = t->clut + (*g++) * FONT_WIDTH / sizeof(u16);
+		*p++ = *c++;
+		*p++ = *c++;
+		*p = *c;
 		p += SCREEN_WIDTH / 2 - 2;
 	}
 }
@@ -88,8 +100,11 @@ void clr_screen(void *fb, u8 color) {
 
 void term_rst(term_t *t, u8 fg, u8 bg) {
 	t->cur = 0;
-	t->cur_fg = fg;
-	t->cur_bg = bg;
+	if (fg != t->cur_fg || bg != t->cur_bg) {
+		t->cur_fg = fg;
+		t->cur_bg = bg;
+		term_gen_clut(t);
+	}
 	clr_screen(t->fb, bg);
 }
 
@@ -121,10 +136,16 @@ void scroll(term_t *t) {
 void term_ctl(term_t *t, int ctl_code, int ctl_param) {
 	switch (ctl_code) {
 	case TERM_COLOR:
-		t->cur_fg = ctl_param;
+		if (t->cur_fg != ctl_param) {
+			t->cur_fg = ctl_param;
+			term_gen_clut(t);
+		}
 		break;
 	case TERM_BG_COLOR:
-		t->cur_bg = ctl_param;
+		if (t->cur_bg != ctl_param) {
+			t->cur_bg = ctl_param;
+			term_gen_clut(t);
+		}
 		break;
 	case TERM_MOVE_X: {
 		unsigned x_pos = t->cur % TERM_WIDTH;
@@ -194,7 +215,7 @@ void term_prt(term_t * t, const char *s) {
 #endif
 				scroll(t);
 			}
-			write_char(t->fb,
+			write_char(t,
 				(t->cur % TERM_WIDTH) * FONT_WIDTH,
 				(t->cur / TERM_WIDTH) * FONT_HEIGHT,
 				c, t->cur_fg, t->cur_bg);
