@@ -2,6 +2,22 @@
 #include <assert.h>
 #include "term256.h"
 
+#define BG_WIDTH 256
+#define BG_HEIGHT 256
+
+#define TERM_WIDTH (FONT_WIDTH * TERM_COLS)
+#define TERM_HEIGHT (FONT_HEIGHT * TERM_ROWS)
+
+// default scroll x, center, border both side
+#define SCROLL_X0 ((TERM_WIDTH - SCREEN_WIDTH) / 2)
+// default scroll y, touch bottom to hide text below on fb, border on top
+#define SCROLL_Y0 ((TERM_HEIGHT - SCREEN_HEIGHT))
+
+// use extra bg space to do native scroll, if possible
+#define FB_ROWS (BG_HEIGHT / FONT_HEIGHT)
+#define HW_SCROLL_STEPS (FB_ROWS - TERM_ROWS)
+
+// make VC happy
 #ifdef _MSC_VER
 #define ITCM_CODE
 #define UNROLL
@@ -9,7 +25,7 @@
 #define UNROLL __attribute__((optimize("unroll-loops")))
 #endif
 
-#define RGB(r,g,b) RGB15(r, g, b)
+#define RGB(r, g, b) RGB15(r, g, b)
 #define RBITS 5
 #define RMAX (1 << RBITS)
 #define GBITS 5
@@ -18,7 +34,7 @@
 #define BMAX (1 << BBITS)
 
 // https://en.wikipedia.org/wiki/ANSI_escape_code#Colors
-void generate_ansi256_palette(color_t *p) {
+void generate_ansi256_palette(u16 *p) {
 	// maybe I should use round to improve precision
 	// standard colors
 	*p++ = RGB(0, 0, 0);
@@ -78,19 +94,19 @@ ITCM_CODE
 UNROLL
 static inline void write_char(term_t *t, unsigned x, unsigned y, unsigned char c, unsigned char color, unsigned char bg_color) {
 	const unsigned char *g = font + c * FONT_HEIGHT;
-	u16 *p = t->fb + (y * SCREEN_WIDTH + x) / 2;
+	u16 *p = t->fb + (y * BG_WIDTH + x) / 2;
 	for (unsigned fy = 0; fy < FONT_HEIGHT; ++fy) {
 		u16 *c = t->clut + (*g++) * FONT_WIDTH / sizeof(u16);
 		*p++ = *c++;
 		*p++ = *c++;
 		*p = *c;
-		p += SCREEN_WIDTH / 2 - 2;
+		p += BG_WIDTH / 2 - 2;
 	}
 }
 
 void clr_screen(void *fb, u8 color) {
 	u32 *p = (u32*)fb;
-	u32 *p_end = p + (SCREEN_WIDTH * SCREEN_HEIGHT / sizeof(u32));
+	u32 *p_end = p + (BG_WIDTH * TERM_HEIGHT / sizeof(u32));
 	u32 c4 = color | color << 8 | color << 16 | color << 24;
 	while (p < p_end) {
 		*p++ = c4; *p++ = c4; *p++ = c4; *p++ = c4;
@@ -108,20 +124,25 @@ void term_rst(term_t *t, u8 fg, u8 bg) {
 	clr_screen(t->fb, bg);
 }
 
-void term_init(term_t *t, u16 *fb) {
+void term_init(term_t *t, u16 *fb, set_scroll_cb_t cb, void *cb_param) {
 	t->fb = fb;
+	t->set_scroll_cb = cb;
+	t->set_scroll_cb_param = cb_param;
+	if (cb != 0) {
+		cb(SCROLL_X0, SCROLL_Y0, cb_param);
+	}
 	term_rst(t, 15, 0);
 }
 
-static_assert((FONT_HEIGHT * SCREEN_WIDTH) % sizeof(u32) == 0, "this thing can't handle this");
-static_assert((FONT_HEIGHT * SCREEN_WIDTH / sizeof(u32)) % 8 == 0, "you can't unroll that much");
+static_assert((FONT_HEIGHT * BG_WIDTH) % sizeof(u32) == 0, "this thing can't handle this");
+static_assert((FONT_HEIGHT * BG_WIDTH / sizeof(u32)) % 8 == 0, "you can't unroll that much");
 #ifdef ARM9
 ITCM_CODE
 #endif
 void scroll(term_t *t) {
 	u32 *p = (u32*)t->fb;
-	u32 *p_src = p + (FONT_HEIGHT * SCREEN_WIDTH / sizeof(u32));
-	u32 *p_end = p + (FONT_HEIGHT * SCREEN_WIDTH / sizeof(u32) * (TERM_HEIGHT - 1));
+	u32 *p_src = p + (FONT_HEIGHT * BG_WIDTH / sizeof(u32));
+	u32 *p_end = p + (FONT_HEIGHT * BG_WIDTH / sizeof(u32) * (TERM_ROWS - 1));
 	while (p < p_end) {
 		*p++ = *p_src++; *p++ = *p_src++; *p++ = *p_src++; *p++ = *p_src++;
 		*p++ = *p_src++; *p++ = *p_src++; *p++ = *p_src++; *p++ = *p_src++;
@@ -130,7 +151,7 @@ void scroll(term_t *t) {
 		*p++ = 0; *p++ = 0; *p++ = 0; *p++ = 0;
 		*p++ = 0; *p++ = 0; *p++ = 0; *p++ = 0;
 	}
-	t->cur -= TERM_WIDTH;
+	t->cur -= TERM_COLS;
 }
 
 void term_ctl(term_t *t, int ctl_code, int ctl_param) {
@@ -148,9 +169,9 @@ void term_ctl(term_t *t, int ctl_code, int ctl_param) {
 		}
 		break;
 	case TERM_MOVE_X: {
-		unsigned x_pos = t->cur % TERM_WIDTH;
+		unsigned x_pos = t->cur % TERM_COLS;
 		unsigned min_cur = t->cur - x_pos;
-		unsigned max_cur = t->cur - x_pos + TERM_WIDTH - 1;
+		unsigned max_cur = t->cur - x_pos + TERM_COLS - 1;
 		if (max_cur > TERM_MAX_CHARS) {
 			max_cur = TERM_MAX_CHARS;
 		}
@@ -162,9 +183,9 @@ void term_ctl(term_t *t, int ctl_code, int ctl_param) {
 		}
 		break;
 	} case TERM_MOVE_Y: {
-		unsigned min_cur = t->cur % TERM_WIDTH;
-		unsigned max_cur = TERM_WIDTH * (TERM_HEIGHT - 1) + min_cur;
-		t->cur += ctl_param * TERM_HEIGHT;
+		unsigned min_cur = t->cur % TERM_COLS;
+		unsigned max_cur = TERM_COLS * (TERM_ROWS - 1) + min_cur;
+		t->cur += ctl_param * TERM_ROWS;
 		if (t->cur < min_cur) {
 			t->cur = min_cur;
 		} else if(t->cur > max_cur){
@@ -178,26 +199,26 @@ void term_ctl(term_t *t, int ctl_code, int ctl_param) {
 
 #define TAB_WIDTH 4
 
-void term_prt(term_t * t, const char *s) {
+void term_prt(term_t *t, const char *s) {
 	// TODO: parse ANSI escape code
 	// currently you can use term_ctl instead
 	unsigned char c;
 	while ((c = *(const unsigned char*)s++) != 0) {
 		if (c == '\n') {
 			// tx is short for terminal x, not transmission
-			unsigned tx = t->cur % TERM_WIDTH;
+			unsigned tx = t->cur % TERM_COLS;
 			if (tx != 0) {
 				// do not allow empty line
 				// also, new line never causes scroll
-				t->cur += TERM_WIDTH - tx;
+				t->cur += TERM_COLS - tx;
 			}
 		} else if (c == '\r') {
-			t->cur -= t->cur % TERM_WIDTH;
+			t->cur -= t->cur % TERM_COLS;
 		} else if (c == '\t') {
-			unsigned tx = t->cur % TERM_WIDTH;
+			unsigned tx = t->cur % TERM_COLS;
 			unsigned new_tx = tx + TAB_WIDTH;
 			new_tx -= new_tx % TAB_WIDTH;
-			if (new_tx > TERM_WIDTH) {
+			if (new_tx > TERM_COLS) {
 				new_tx = TERM_WIDTH;
 			}
 			new_tx -= tx; // becomes d_tx now
@@ -216,8 +237,8 @@ void term_prt(term_t * t, const char *s) {
 				scroll(t);
 			}
 			write_char(t,
-				(t->cur % TERM_WIDTH) * FONT_WIDTH,
-				(t->cur / TERM_WIDTH) * FONT_HEIGHT,
+				(t->cur % TERM_COLS) * FONT_WIDTH,
+				(t->cur / TERM_COLS) * FONT_HEIGHT,
 				c, t->cur_fg, t->cur_bg);
 			++t->cur;
 		}
@@ -230,8 +251,8 @@ void term_raw(term_t *t, char c) {
 		scroll(t);
 	}
 	write_char(t,
-		(t->cur % TERM_WIDTH) * FONT_WIDTH,
-		(t->cur / TERM_WIDTH) * FONT_HEIGHT,
+		(t->cur % TERM_COLS) * FONT_WIDTH,
+		(t->cur / TERM_COLS) * FONT_HEIGHT,
 		c, t->cur_fg, t->cur_bg);
 	++t->cur;
 }
