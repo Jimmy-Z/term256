@@ -25,14 +25,14 @@ typedef struct {
 	set_scroll_cb_t set_scroll_cb;
 	void *set_scroll_cb_param;
 	int esc_state;
-	char esc_arg[TERM_ESC_ARG_LEN];
-	unsigned esc_arg_cur;
+	unsigned esc_argv[TERM_ESC_ARG_LEN];
+	unsigned esc_argc;
 }term_t;
 
 enum {
-	TERM_ESTATE_CSI, // default state, waiting CSI (\x9b) or ESC (\x1b)
-	TERM_ESTATE_LSB, // waiting left square bracket '[' (\x5b)
-	TERM_ESTATE_ARG, // waiting/parsing numeric parameters
+	TERM_ESTATE_INIT,
+	TERM_ESTATE_B2,
+	TERM_ESTATE_CSI,
 };
 
 enum {

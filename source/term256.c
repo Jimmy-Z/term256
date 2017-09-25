@@ -2,6 +2,11 @@
 #include <assert.h>
 #include "term256.h"
 
+#ifdef TERM256_DEBUG
+void dbg_iprtf(const char *fmt, ...)
+	_ATTRIBUTE ((__format__ (__printf__, 1, 2)));
+#endif
+
 #define BG_WIDTH 256
 #define BG_HEIGHT 256
 
@@ -127,8 +132,9 @@ void term_rst(term_t *t, u8 fg, u8 bg) {
 		t->color_bg = bg;
 		term_gen_clut(t);
 	}
-	t->esc_state = TERM_ESTATE_CSI;
-	t->esc_arg_cur = 0;
+	t->esc_state = TERM_ESTATE_INIT;
+	t->esc_argc = 0;
+	t->esc_argv[0] = 0;
 	clr_screen(t->bg, bg);
 }
 
@@ -258,9 +264,9 @@ void term_raw(term_t *t, char c) {
 }
 
 /*
-the ANSI ESC state machine only supports (some) CSI
+our ANSI ESC state machine only supports (some) CSI
 	either two bytes \x1b(ESC/27/033)\x5b([/91/133) or single byte \x9b(155/233)
-	doesn't support any other Non-CSI \x1b\x40~\x5f \x80~\x9f control characters
+	doesn't support any other Non-CSI \x1b\x40~\x5f or \x80~\x9f
 CSI codes:
 https://en.wikipedia.org/wiki/ANSI_escape_code#CSI_codes
 	CSI n 'ABCD'	CUU/D/F/B, cursor movement
@@ -278,9 +284,174 @@ https://en.wikipedia.org/wiki/ANSI_escape_code#Colors
 	39/49		default text/background color
 basically I choose some that's easy to implement
 */
+enum {
+	COLOR_FG_DEF = 0xf,
+	COLOR_BG_DEF = 0,
+};
+enum {
+	SGR_INIT,
+	SGR_FG_EXT,
+	SGR_FG_EXT5,
+	SGR_BG_EXT,
+	SGR_BG_EXT5
+};
+enum {
+	SGR_NO_ERR = 0,
+	SGR_UNSUPPORTED,
+	SGR_UNSUPPORTED_EXT
+};
+void term_sgr(term_t *t) {
+	// SGR has no use outside CSI, but too big so it's separated
+	int sgr = SGR_INIT, err = 0;
+	unsigned color_fg = t->color_fg, color_bg = t->color_bg;
+	unsigned tmp;
+	// dbg_iprtf("SGR argc = %d\n", t->esc_argc);
+	// beware how args are handled, <= is correct
+	for (unsigned i = 0; i <= t->esc_argc; ++i) {
+		int arg = t->esc_argv[i];
+		// dbg_iprtf("\tSGR arg = %d\n", arg);
+		switch (sgr) {
+		case SGR_INIT:
+			switch (arg) {
+			case 0:
+				color_fg = COLOR_FG_DEF;
+				color_bg = COLOR_BG_DEF;
+				break;
+			case 1:
+				if (color_fg >= 0 && color_fg <= 7) {
+					color_fg += 8;
+				}
+				break;
+			case 7:
+				tmp = color_fg;
+				color_fg = color_bg;
+				color_bg = tmp;
+				break;
+			case 38:
+				sgr = SGR_FG_EXT;
+				break;
+			case 39:
+				color_fg = COLOR_FG_DEF;
+				break;
+			case 48:
+				sgr = SGR_BG_EXT;
+				break;
+			case 49:
+				color_bg = COLOR_BG_DEF;
+				break;
+			default:
+				if (arg >= 30 && arg <= 37) {
+					color_fg = arg - 30;
+				} else if (arg >= 40 && arg <= 47) {
+					color_bg = arg - 40;
+				}
+			}
+			break;
+		case SGR_FG_EXT:
+			if (arg == 5) {
+				sgr = SGR_FG_EXT5;
+			} else {
+				// unsupported ext modes
+				// so we don't know how to interpret the rest
+				err = SGR_UNSUPPORTED_EXT;
+			}
+			break;
+		case SGR_BG_EXT:
+			if (arg == 5) {
+				sgr = SGR_BG_EXT5;
+			} else {
+				err = SGR_UNSUPPORTED_EXT;
+			}
+			break;
+		case SGR_FG_EXT5:
+			color_fg = arg & 0xff;
+			sgr = SGR_INIT;
+			break;
+		case SGR_BG_EXT5:
+			color_bg = arg & 0xff;
+			sgr = SGR_INIT;
+			break;
+		default:
+			err = SGR_UNSUPPORTED;
+		}
+		if (err) {
+			// dbg_iprtf("SGR: err %d\n", err);
+			break;
+		}
+	}
+	if (t->color_fg != color_fg || t->color_bg != color_bg) {
+		t->color_fg = color_fg;
+		t->color_bg = color_bg;
+		term_gen_clut(t);
+	}
+}
 
+enum {
+	CSI_CUU = 'A',
+	CSI_CUD = 'B',
+	CSI_CUF = 'C',
+	CSI_CUB = 'D',
+	CSI_CUP = 'H',
+	CSI_ED = 'J',
+	CSI_HVP = 'f',
+	CSI_SGR = 'm'
+};
 // return 1 if consumed
 int term_esc(term_t *t, char c) {
+	switch (t->esc_state) {
+	case TERM_ESTATE_INIT:
+		switch (c) {
+		case '\x1b':
+			t->esc_state = TERM_ESTATE_B2;
+			return 1;
+		case '\x9b':
+			t->esc_state = TERM_ESTATE_CSI;
+			return 1;
+		default:
+			return 0;
+		}
+	case TERM_ESTATE_B2: // waiting for byte 2 after ESC
+		if (c == '[') {
+			t->esc_state = TERM_ESTATE_CSI;
+			return 1;
+		} else {
+			// not CSI, not supported
+			t->esc_state = TERM_ESTATE_INIT;
+			// but consider it handled(eaten)
+			return 1;
+		}
+	case TERM_ESTATE_CSI:
+		if (c >= 0x40 && c <= 0x7e) {
+			// this is the end of escape sequence
+			switch (c) {
+			case CSI_SGR:
+				term_sgr(t);
+			default:
+				// not supported
+				break;
+			}
+			t->esc_state = TERM_ESTATE_INIT;
+			t->esc_argc = 0;
+			t->esc_argv[0] = 0;
+			return 1;
+		} else if(t->esc_argc < TERM_ESC_ARG_LEN){
+			// handle the char as arg
+			if (c >= '0' && c <= '9') {
+				t->esc_argv[t->esc_argc] = t->esc_argv[t->esc_argc] * 10 + c - '0';
+			} else if (c == ';') { // the delimiter
+				++ t->esc_argc;
+				if (t->esc_argc < TERM_ESC_ARG_LEN) {
+					t->esc_argv[t->esc_argc] = 0;
+				}
+			} else {
+				// anything other than 0~9 or ; is dropped
+			}
+			return 1;
+		} else {
+			// if the arg is too long they're just silently dropped
+			return 1;
+		}
+	}
 	return 0;
 }
 
@@ -288,8 +459,6 @@ int term_esc(term_t *t, char c) {
 
 // handles some special characters
 void term_prt(term_t *t, const char *s) {
-	// TODO: parse ANSI escape code
-	// currently you can use term_ctl instead
 	unsigned char c;
 	while ((c = *(const unsigned char*)s++) != 0) {
 		if (term_esc(t, c)) {

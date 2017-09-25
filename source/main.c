@@ -1,4 +1,6 @@
 #include <nds.h>
+#include <stdarg.h>
+#include <stdio.h>
 
 #include "term256.h"
 #include "term256ext.h"
@@ -79,6 +81,15 @@ void set_scroll(int x, int y, void *param) {
 	bgUpdate();
 }
 
+char dbg_iprtf_str_buf[0x200];
+void dbg_iprtf(const char *fmt, ...) {
+	va_list args;
+	va_start(args, fmt);
+	vsniprintf(dbg_iprtf_str_buf, 0x200, fmt, args);
+	va_end(args);
+	term_prt(&t0, dbg_iprtf_str_buf);
+}
+
 int main(void)
 {
 	videoSetModeSub(MODE_3_2D);
@@ -116,9 +127,9 @@ int main(void)
 		if (!wait) {
 			cpuStartTiming(0);
 		}
-		term_rst(&t1, 15, 0);
 		// char map
-		prt("  ");
+		prt("\x1b[0m  ");
+		// wait && wait_key(KEY_A);
 		for (unsigned i = 0; i < 0x10; ++i) {
 			iprtf(" %x", i);
 		}
@@ -154,21 +165,17 @@ int main(void)
 			if (wait && !(i & 0xf)) {
 				swiWaitForVBlank();
 			}
-			term_ctl(&t1, TERM_COLOR, i);
-			iprtf("%02x", i);
+			iprtf("\x1b[38;5;%dm%02x", i, i);
 		}
 		prt("\n");
 		// font face test
-		term_ctl(&t1, TERM_COLOR, 15);
+		prt("\x1b[37;1m");
 		prt("a quick brown fox jumps over the lazy dog,\n");
-		term_ctl(&t1, TERM_COLOR, 0);
-		term_ctl(&t1, TERM_BG_COLOR, 15);
+		prt("\x1b[30;48;5;15m");
 		prt("a quick brown fox jumps over the lazy dog,\n");
-		term_ctl(&t1, TERM_COLOR, 15);
-		term_ctl(&t1, TERM_BG_COLOR, 0);
+		prt("\x1b[37;1;40m");
 		prt("A QUICK BROWN FOX JUMPS OVER THE LAZY DOG.\n");
-		term_ctl(&t1, TERM_COLOR, 0);
-		term_ctl(&t1, TERM_BG_COLOR, 15);
+		prt("\x1b[30;48;5;15m");
 		prt("A QUICK BROWN FOX JUMPS OVER THE LAZY DOG.\n");
 		if (!wait) {
 			select_term(&t0);
