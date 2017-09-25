@@ -6,7 +6,7 @@
 #include "term256ext.h"
 
 // show ANSI color palette, 8 rows
-void show_ansi256_color_table(u16 *fb, unsigned width, unsigned height) {
+void show_ansi256_color_table(u16 *bg, unsigned width, unsigned height) {
 	// don't care about speed, 1 pixel at a time
 	unsigned row_height = height / 8;
 	// first row, 16 standard and intense colors
@@ -15,12 +15,12 @@ void show_ansi256_color_table(u16 *fb, unsigned width, unsigned height) {
 		unsigned start_x = i * block_width;
 		for (unsigned y = 0; y < row_height; ++y) {
 			for (unsigned x = start_x; x < start_x + block_width; ++x){
-				// fb[y * width + x] = i;
+				// bg[y * width + x] = i;
 				unsigned offset = (y * width + x) >> 1;
 				if (x & 1) {
-					fb[offset] = (fb[offset] & 0xff) | (i << 8);
+					bg[offset] = (bg[offset] & 0xff) | (i << 8);
 				} else {
-					fb[offset] = (fb[offset] & 0xff00) | i;
+					bg[offset] = (bg[offset] & 0xff00) | i;
 				}
 			}
 		}
@@ -34,12 +34,12 @@ void show_ansi256_color_table(u16 *fb, unsigned width, unsigned height) {
 			unsigned start_y = (i + 1) * row_height;
 			for (unsigned y = start_y; y < start_y + row_height; ++y) {
 				for (unsigned x = start_x; x < start_x + block_width; ++x){
-					// fb[y * width + x] = c;
+					// bg[y * width + x] = c;
 					unsigned offset = (y * width + x) >> 1;
 					if (x & 1) {
-						fb[offset] = (fb[offset] & 0xff) | (c << 8);
+						bg[offset] = (bg[offset] & 0xff) | (c << 8);
 					} else {
-						fb[offset] = (fb[offset] & 0xff00) | c;
+						bg[offset] = (bg[offset] & 0xff00) | c;
 					}
 				}
 			}
@@ -54,9 +54,9 @@ void show_ansi256_color_table(u16 *fb, unsigned width, unsigned height) {
 			for (unsigned x = start_x; x < start_x + block_width; ++x){
 				unsigned offset = (y * width + x) >> 1;
 				if (x & 1) {
-					fb[offset] = (fb[offset] & 0xff) | (c << 8);
+					bg[offset] = (bg[offset] & 0xff) | (c << 8);
 				} else {
-					fb[offset] = (fb[offset] & 0xff00) | c;
+					bg[offset] = (bg[offset] & 0xff00) | c;
 				}
 			}
 		}
@@ -96,15 +96,15 @@ int main(void)
 	videoSetMode(MODE_3_2D);
 	vramSetBankC(VRAM_C_SUB_BG);
 	vramSetBankA(VRAM_A_MAIN_BG);
-	int bg0 = bgInitSub(3, BgType_Bmp8, BgSize_B8_256x256, 0, 0);
-	int bg1 = bgInit(3, BgType_Bmp8, BgSize_B8_256x256, 0, 0);
-	u16 *fb0 = bgGetGfxPtr(bg0);
-	u16 *fb1 = bgGetGfxPtr(bg1);
+	int bg0id = bgInitSub(3, BgType_Bmp8, BgSize_B8_256x256, 0, 0);
+	int bg1id = bgInit(3, BgType_Bmp8, BgSize_B8_256x256, 0, 0);
+	u16 *bg0 = bgGetGfxPtr(bg0id);
+	u16 *bg1 = bgGetGfxPtr(bg1id);
 	generate_ansi256_palette(BG_PALETTE_SUB);
 	dmaCopy(BG_PALETTE_SUB, BG_PALETTE, 256 * 2);
 
-	term_init(&t0, fb0, set_scroll, &bg0);
-	term_init(&t1, fb1, set_scroll, &bg1);
+	term_init(&t0, bg0, set_scroll, &bg0id);
+	term_init(&t1, bg1, set_scroll, &bg1id);
 	// term_init(&t1, fb1, 0, 0);
 
 	select_term(&t0);
@@ -128,7 +128,7 @@ int main(void)
 			cpuStartTiming(0);
 		}
 		// char map
-		prt("\x1b[0m  ");
+		prt("\x1b[0m\x1b[2J  ");
 		// wait && wait_key(KEY_A);
 		for (unsigned i = 0; i < 0x10; ++i) {
 			iprtf(" %x", i);
@@ -169,29 +169,29 @@ int main(void)
 		}
 		prt("\n");
 		// font face test
-		prt("\x1b[37;1m");
+		prt("\x1b[0,1m");
 		prt("a quick brown fox jumps over the lazy dog,\n");
-		prt("\x1b[30;48;5;15m");
+		prt("\x1b[7m");
 		prt("a quick brown fox jumps over the lazy dog,\n");
-		prt("\x1b[37;1;40m");
+		prt("\x1b[7m");
 		prt("A QUICK BROWN FOX JUMPS OVER THE LAZY DOG.\n");
-		prt("\x1b[30;48;5;15m");
+		prt("\x1b[7m");
 		prt("A QUICK BROWN FOX JUMPS OVER THE LAZY DOG.\n");
+
 		if (!wait) {
 			select_term(&t0);
 			iprtf("render time %lu \xe6s\n", timerTicks2usec(cpuEndTiming()));
 			select_term(&t1);
 		}
-
 		if (wait_key(KEY_A | KEY_B) == KEY_B) {
 			break;
 		}
 		wait = !wait;
 	}
-	clr_screen(fb1, 0);
-	bgSetScroll(bg1, 0, 0);
+	clr_bg(bg1, SCREEN_HEIGHT, 0);
+	bgSetScroll(bg1id, 0, 0);
 	bgUpdate();
-	show_ansi256_color_table(fb1, SCREEN_WIDTH, SCREEN_HEIGHT);
+	show_ansi256_color_table(bg1, SCREEN_WIDTH, SCREEN_HEIGHT);
 	wait_key(KEY_A | KEY_B);
 	return 0;
 }

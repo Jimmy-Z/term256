@@ -37,14 +37,21 @@ enum {
 
 enum {
 	TERM_COLOR,
+	TERM_FG_COLOR,
 	TERM_BG_COLOR,
+	TERM_MOVE,
 	TERM_MOVE_COL,
 	TERM_MOVE_ROW,
 	TERM_SET_COL,
 	TERM_SET_ROW,
 };
 
-void clr_screen(void *fb, u8 color);
+enum {
+	COLOR_FG_DEF = 7,
+	COLOR_BG_DEF = 0,
+};
+
+void clr_bg(void *bg, unsigned height, u8 color);
 
 void term_init(term_t *t, u16 *fb, set_scroll_cb_t cb, void *cb_param);
 
@@ -52,6 +59,6 @@ void term_rst(term_t *t, u8 fg, u8 bg);
 
 void term_prt(term_t *t, const char *string);
 
-void term_ctl(term_t *t, int ctl_code, int ctl_param);
+void term_ctl(term_t *t, int ctl_code, int param0, int param1);
 
 void term_raw(term_t *t, char c);

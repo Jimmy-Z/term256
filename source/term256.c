@@ -109,9 +109,9 @@ static inline void write_char(term_t *t, unsigned x, unsigned y, unsigned char c
 	}
 }
 
-void clr_screen(void *fb, u8 color) {
-	u32 *p = (u32*)fb;
-	u32 *p_end = p + (BG_WIDTH * TERM_HEIGHT / sizeof(u32));
+void clr_bg(void *bg, unsigned height, u8 color) {
+	u32 *p = (u32*)bg;
+	u32 *p_end = p + (BG_WIDTH * height / sizeof(u32));
 	u32 c4 = color | color << 8 | color << 16 | color << 24;
 	while (p < p_end) {
 		*p++ = c4; *p++ = c4; *p++ = c4; *p++ = c4;
@@ -133,9 +133,7 @@ void term_rst(term_t *t, u8 fg, u8 bg) {
 		term_gen_clut(t);
 	}
 	t->esc_state = TERM_ESTATE_INIT;
-	t->esc_argc = 0;
-	t->esc_argv[0] = 0;
-	clr_screen(t->bg, bg);
+	clr_bg(t->bg, TERM_HEIGHT, bg);
 }
 
 void term_init(term_t *t, u16 *bg, set_scroll_cb_t cb, void *cb_param) {
@@ -143,7 +141,7 @@ void term_init(term_t *t, u16 *bg, set_scroll_cb_t cb, void *cb_param) {
 	t->set_scroll_cb = cb;
 	t->set_scroll_cb_param = cb_param;
 	t->scroll_pos = 1; // trigger scroll_cb in term_rst
-	term_rst(t, 15, 0);
+	term_rst(t, COLOR_FG_DEF, COLOR_BG_DEF);
 }
 
 static_assert((FONT_HEIGHT * BG_WIDTH) % sizeof(u32) == 0, "this thing can't handle this");
@@ -153,6 +151,7 @@ ITCM_CODE
 #endif
 void scroll(term_t *t) {
 	if (t->set_scroll_cb == 0) {
+		// no hardware scroll, full software scroll
 		u32 *p = (u32*)t->bg;
 		u32 *p_end = p + (FONT_HEIGHT * BG_WIDTH / sizeof(u32) * (TERM_ROWS - 1));
 		u32 *p_src = p + (FONT_HEIGHT * BG_WIDTH / sizeof(u32));
@@ -166,6 +165,7 @@ void scroll(term_t *t) {
 		}
 		t->cur -= TERM_COLS;
 	} else if (t->scroll_pos < HW_SCROLL_STEPS){
+		// hardware scroll, but clear the row just showed up
 		u32 *p = (u32*)t->bg + (FONT_HEIGHT * BG_WIDTH / sizeof(u32) * (TERM_ROWS + t->scroll_pos));
 		u32 *p_end = p + (FONT_HEIGHT * BG_WIDTH / sizeof(u32));
 		while (p < p_end) {
@@ -176,6 +176,7 @@ void scroll(term_t *t) {
 		t->set_scroll_cb(SCROLL_X0, SCROLL_Y0 + FONT_HEIGHT * t->scroll_pos, t->set_scroll_cb_param);
 		t->cur -= TERM_COLS;
 	} else {
+		// hardware scroll end of bg, reset back to top, like software scroll, just different positions
 		u32 *p = (u32*)t->bg;
 		u32 *p_end = p + (FONT_HEIGHT * BG_WIDTH / sizeof(u32) * (TERM_ROWS - 1));
 		u32 *p_src = p + (FONT_HEIGHT * BG_WIDTH / sizeof(u32) * (BG_ROWS - TERM_ROWS + 1));
@@ -194,17 +195,24 @@ void scroll(term_t *t) {
 	}
 }
 
-void term_ctl(term_t *t, int ctl_code, int ctl_param) {
+void term_ctl(term_t *t, int ctl_code, int param0, int param1) {
 	switch (ctl_code) {
 	case TERM_COLOR:
-		if (t->color_fg != ctl_param) {
-			t->color_fg = ctl_param;
+		if (t->color_fg != param0 || t->color_bg != param1) {
+			t->color_fg = param0;
+			t->color_bg = param1;
+			term_gen_clut(t);
+		}
+		break;
+	case TERM_FG_COLOR:
+		if (t->color_fg != param0) {
+			t->color_fg = param0;
 			term_gen_clut(t);
 		}
 		break;
 	case TERM_BG_COLOR:
-		if (t->color_bg != ctl_param) {
-			t->color_bg = ctl_param;
+		if (t->color_bg != param0) {
+			t->color_bg = param0;
 			term_gen_clut(t);
 		}
 		break;
@@ -217,9 +225,9 @@ void term_ctl(term_t *t, int ctl_code, int ctl_param) {
 			max_cur = TERM_MAX_CHARS;
 		}
 		if (ctl_code == TERM_MOVE_COL) {
-			t->cur += ctl_param;
+			t->cur += param0;
 		} else {
-			t->cur = min_cur + ctl_param;
+			t->cur = min_cur + param0;
 		}
 		if (t->cur < min_cur) {
 			t->cur = min_cur;
@@ -232,15 +240,28 @@ void term_ctl(term_t *t, int ctl_code, int ctl_param) {
 		unsigned min_cur = t->cur % TERM_COLS;
 		unsigned max_cur = TERM_COLS * (TERM_ROWS - 1) + min_cur;
 		if (ctl_code == TERM_MOVE_ROW) {
-			t->cur += ctl_param * TERM_COLS;
+			t->cur += param0 * TERM_COLS;
 		} else {
-			t->cur = (t->cur % TERM_COLS) + (ctl_param * TERM_COLS);
+			t->cur = (t->cur % TERM_COLS) + (param0 * TERM_COLS);
 		}
 		if (t->cur < min_cur) {
 			t->cur = min_cur;
-		} else if(t->cur > max_cur){
+		} else if (t->cur > max_cur) {
 			t->cur = max_cur;
 		}
+		break;
+	}case TERM_MOVE:{
+		if (param0 < 0) {
+			param0 = 0;
+		} else if (param1 > TERM_ROWS - 1) {
+			param0 = TERM_ROWS - 1;
+		}
+		if (param1 < 0) {
+			param1 = 0;
+		} else if (param1 > TERM_COLS - 1) {
+			param1 = TERM_COLS - 1;
+		}
+		t->cur = param0 * TERM_COLS + param1;
 		break;
 	} default:
 		break;
@@ -282,12 +303,7 @@ https://en.wikipedia.org/wiki/ANSI_escape_code#Colors
 	30~37/40~47	text/background color from palette 0~7
 	38/48;5;n	text/background color, extended, from palette 0~255
 	39/49		default text/background color
-basically I choose some that's easy to implement
 */
-enum {
-	COLOR_FG_DEF = 0xf,
-	COLOR_BG_DEF = 0,
-};
 enum {
 	SGR_INIT,
 	SGR_FG_EXT,
@@ -379,11 +395,7 @@ void term_sgr(term_t *t) {
 			break;
 		}
 	}
-	if (t->color_fg != color_fg || t->color_bg != color_bg) {
-		t->color_fg = color_fg;
-		t->color_bg = color_bg;
-		term_gen_clut(t);
-	}
+	term_ctl(t, TERM_COLOR, color_fg, color_bg);
 }
 
 enum {
@@ -406,6 +418,8 @@ int term_esc(term_t *t, char c) {
 			return 1;
 		case '\x9b':
 			t->esc_state = TERM_ESTATE_CSI;
+			t->esc_argc = 0;
+			t->esc_argv[0] = 0;
 			return 1;
 		default:
 			return 0;
@@ -413,31 +427,58 @@ int term_esc(term_t *t, char c) {
 	case TERM_ESTATE_B2: // waiting for byte 2 after ESC
 		if (c == '[') {
 			t->esc_state = TERM_ESTATE_CSI;
+			t->esc_argc = 0;
+			t->esc_argv[0] = 0;
 			return 1;
 		} else {
 			// not CSI, not supported
 			t->esc_state = TERM_ESTATE_INIT;
-			// but consider it handled(eaten)
-			return 1;
+			return 0;
 		}
 	case TERM_ESTATE_CSI:
 		if (c >= 0x40 && c <= 0x7e) {
 			// this is the end of escape sequence
 			switch (c) {
+			case CSI_CUU:
+				term_ctl(t, TERM_MOVE_ROW, -t->esc_argv[0], 0);
+				break;
+			case CSI_CUD:
+				term_ctl(t, TERM_MOVE_ROW, t->esc_argv[0], 0);
+				break;
+			case CSI_CUF:
+				term_ctl(t, TERM_MOVE_COL, t->esc_argv[0], 0);
+				break;
+			case CSI_CUB:
+				term_ctl(t, TERM_MOVE_COL, -t->esc_argv[0], 0);
+				break;
+			case CSI_CUP:
+			case CSI_HVP:
+				if (t->esc_argc == 1) {
+					// they're 1 based
+					term_ctl(t, TERM_MOVE, t->esc_argv[0] - 1, t->esc_argv[1] - 1);
+				}
+				break;
+			case CSI_ED:
+				if (t->esc_argv[0] == 2) {
+					term_rst(t, t->color_fg, t->color_bg);
+					term_ctl(t, TERM_MOVE, 0, 0);
+				}
+				break;
 			case CSI_SGR:
 				term_sgr(t);
+				break;
 			default:
 				// not supported
 				break;
 			}
 			t->esc_state = TERM_ESTATE_INIT;
-			t->esc_argc = 0;
-			t->esc_argv[0] = 0;
 			return 1;
 		} else if(t->esc_argc < TERM_ESC_ARG_LEN){
 			// handle the char as arg
 			if (c >= '0' && c <= '9') {
-				t->esc_argv[t->esc_argc] = t->esc_argv[t->esc_argc] * 10 + c - '0';
+				if (t->esc_argc < TERM_ESC_ARG_LEN) {
+					t->esc_argv[t->esc_argc] = t->esc_argv[t->esc_argc] * 10 + c - '0';
+				}
 			} else if (c == ';') { // the delimiter
 				++ t->esc_argc;
 				if (t->esc_argc < TERM_ESC_ARG_LEN) {
