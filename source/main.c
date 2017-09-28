@@ -2,8 +2,8 @@
 #include <stdarg.h>
 #include <stdio.h>
 
-#include "term256.h"
-#include "term256ext.h"
+#include "../term256/term256.h"
+#include "../term256/term256ext.h"
 
 // show ANSI color palette, 8 rows
 void show_ansi256_color_table(u16 *bg, unsigned width, unsigned height) {
@@ -92,22 +92,24 @@ void dbg_iprtf(const char *fmt, ...) {
 
 int main(void)
 {
+	// init first console on lower screen
 	videoSetModeSub(MODE_3_2D);
-	videoSetMode(MODE_3_2D);
 	vramSetBankC(VRAM_C_SUB_BG);
-	vramSetBankA(VRAM_A_MAIN_BG);
 	int bg0id = bgInitSub(3, BgType_Bmp8, BgSize_B8_256x256, 0, 0);
-	int bg1id = bgInit(3, BgType_Bmp8, BgSize_B8_256x256, 0, 0);
 	u16 *bg0 = bgGetGfxPtr(bg0id);
-	u16 *bg1 = bgGetGfxPtr(bg1id);
 	generate_ansi256_palette(BG_PALETTE_SUB);
-	dmaCopy(BG_PALETTE_SUB, BG_PALETTE, 256 * 2);
-
 	term_init(&t0, bg0, set_scroll, &bg0id);
+
+	// init second console on upper screen
+	videoSetMode(MODE_3_2D);
+	vramSetBankA(VRAM_A_MAIN_BG);
+	int bg1id = bgInit(3, BgType_Bmp8, BgSize_B8_256x256, 0, 0);
+	u16 *bg1 = bgGetGfxPtr(bg1id);
+	dmaCopy(BG_PALETTE_SUB, BG_PALETTE, 256 * 2);
 	term_init(&t1, bg1, set_scroll, &bg1id);
-	// term_init(&t1, fb1, 0, 0);
 
 	select_term(&t0);
+
 	int is_DSi = isDSiMode();
 	if (is_DSi) {
 		prt("DSi Mode, previous CPU clock was ");
