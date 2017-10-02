@@ -32,3 +32,7 @@ void prtf(const char *fmt, ...) {
 void prt(const char *s) {
 	term_prt(current_term, s);
 }
+
+void activity(int color) {
+	term_activity(current_term, color);
+}

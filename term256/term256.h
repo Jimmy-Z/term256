@@ -47,8 +47,27 @@ enum {
 };
 
 enum {
-	COLOR_FG_DEF = 7,
-	COLOR_BG_DEF = 0,
+	COLOR_BLACK = 0,
+	COLOR_RED,
+	COLOR_GREEN,
+	COLOR_YELLOW,
+	COLOR_BLUE,
+	COLOR_MAGENTA,
+	COLOR_CYAN,
+	COLOR_WHITE,
+	COLOR_BRIGHT_BLACK,
+	COLOR_BRIGHT_RED,
+	COLOR_BRIGHT_GREEN,
+	COLOR_BRIGHT_YELLOW,
+	COLOR_BRIGHT_BLUE,
+	COLOR_BRIGHT_MAGENTA,
+	COLOR_BRIGHT_CYAN,
+	COLOR_BRIGHT_WHITE
+};
+
+enum {
+	COLOR_FG_DEF = COLOR_WHITE,
+	COLOR_BG_DEF = COLOR_BLACK,
 };
 
 void clr_bg(void *bg, unsigned height, u8 color);
@@ -62,3 +81,5 @@ void term_prt(term_t *t, const char *string);
 void term_ctl(term_t *t, int ctl_code, int param0, int param1);
 
 void term_raw(term_t *t, char c);
+
+void term_activity(term_t *t, int color);

@@ -11,3 +11,5 @@ void prtf(const char *fmt, ...)
 	_ATTRIBUTE ((__format__ (__printf__, 1, 2)));
 
 void prt(const char *s);
+
+void activity(int color);

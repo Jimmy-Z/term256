@@ -13,10 +13,16 @@ void dbg_iprtf(const char *fmt, ...)
 #define TERM_WIDTH (FONT_WIDTH * TERM_COLS)
 #define TERM_HEIGHT (FONT_HEIGHT * TERM_ROWS)
 
+#define MARGIN_LEFT ((SCREEN_WIDTH - TERM_WIDTH) / 2)
+#define MARGIN_RIGHT (SCREEN_WIDTH - TERM_WIDTH - MARGIN_LEFT)
+static_assert(MARGIN_LEFT == MARGIN_RIGHT, "should be centered");
+
+#define MARGIN_TOP (SCREEN_HEIGHT - TERM_HEIGHT)
+
 // default scroll x, center, border both side
-#define SCROLL_X0 ((TERM_WIDTH - SCREEN_WIDTH) / 2)
+#define SCROLL_X0 (-MARGIN_LEFT)
 // default scroll y, touch bottom to hide text below on bg, border(previous lines) on top
-#define SCROLL_Y0 ((TERM_HEIGHT - SCREEN_HEIGHT))
+#define SCROLL_Y0 (-MARGIN_TOP)
 
 // use extra bg space to do native scroll, if possible
 #define BG_ROWS (BG_HEIGHT / FONT_HEIGHT)
@@ -99,7 +105,7 @@ ITCM_CODE
 UNROLL
 static inline void write_char(term_t *t, unsigned x, unsigned y, unsigned char c, unsigned char color, unsigned char bg_color) {
 	const unsigned char *g = font + c * FONT_HEIGHT;
-	u16 *p = t->bg + (y * BG_WIDTH + x) / 2;
+	u16 *p = t->bg + (y * BG_WIDTH + x) / sizeof(u16);
 	for (unsigned fy = 0; fy < FONT_HEIGHT; ++fy) {
 		u16 *c = t->clut + (*g++) * FONT_WIDTH / sizeof(u16);
 		*p++ = *c++;
@@ -282,6 +288,28 @@ void term_raw(term_t *t, char c) {
 		((t->cur / TERM_COLS) + t->scroll_pos) * FONT_HEIGHT,
 		c, t->color_fg, t->color_bg);
 	++t->cur;
+}
+
+// use the right most two pixels of current row, so nothing if margin can't contain that
+// 0~255 to ANSI color palette, -1 to use current background color
+void term_activity(term_t *t, int color) {
+#if MARGIN_RIGHT >= 2
+	if (color == -1) {
+		color = t->color_bg;
+	}
+	color &= 0xff;
+	color = color | (color << 8);
+	int row = t->cur / TERM_COLS;
+	if (row >= TERM_ROWS) {
+		row = TERM_ROWS - 1;
+	}
+	u16 *start = t->bg + (BG_WIDTH * (row + t->scroll_pos) * FONT_HEIGHT + SCREEN_WIDTH - MARGIN_LEFT - 2) / sizeof(u16);
+	u16 *end = start + (BG_WIDTH * FONT_HEIGHT);
+	while (start < end) {
+		*start = color;
+		start += BG_WIDTH / sizeof(u16);
+	}
+#endif
 }
 
 /*

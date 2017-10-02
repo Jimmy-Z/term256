@@ -179,6 +179,7 @@ int main(void)
 		prt("A QUICK BROWN FOX JUMPS OVER THE LAZY DOG.\n");
 		prt("\x1b[7m");
 		prt("A QUICK BROWN FOX JUMPS OVER THE LAZY DOG.\n");
+		activity(COLOR_BRIGHT_RED);
 
 		if (!wait) {
 			select_term(&t0);
